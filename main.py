@@ -40,6 +40,18 @@ CSS_STYLES = f"""
         color: var(--text-dark);
         margin: 0;
         overflow-x: hidden;
+        /* 45度角无限移动动画 */
+        animation: polka-dot-move 3s linear infinite;
+    }}
+    
+    @keyframes polka-dot-move {{
+        0% {{
+            background-position: 0 0, 10px 10px;
+        }}
+        100% {{
+            /* 45度角移动：x和y方向都移动20px（一个完整的周期）实现无缝循环 */
+            background-position: 20px 20px, 30px 30px;
+        }}
     }}
 
     /* Funky Button */
@@ -83,10 +95,12 @@ CSS_STYLES = f"""
 
     .card-entry {{
         animation: slide-in-elastic 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+        will-change: transform, opacity;
     }}
     
     .card-entry-done {{
-        /* No animation, just final state */
+        /* No animation, just final state with rotation */
+        transform: rotate(var(--target-rotation));
     }}
     
     /* Card flip animation */
@@ -165,6 +179,53 @@ CSS_STYLES = f"""
         0% {{ transform: scale(0); }}
         50% {{ transform: scale(1.5); }}
         100% {{ transform: scale(1); }}
+    }}
+    
+    /* Instruction Box */
+    .instruction-box {{
+        background: linear-gradient(135deg, #ffeaa7 0%, #fdcb6e 100%);
+        border: 3px solid #000;
+        box-shadow: 4px 4px 0 rgba(0,0,0,0.2);
+        padding: 16px;
+        border-radius: 8px;
+        font-family: 'VT323', monospace;
+        font-size: 1.2rem;
+        line-height: 1.6;
+    }}
+    
+    /* Arrow Tooltip */
+    .arrow-tooltip-container {{
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        margin-bottom: 8px;
+    }}
+    
+    .tooltip-text {{
+        background: var(--accent-pink);
+        color: white;
+        padding: 8px 16px;
+        border: 2px solid #000;
+        border-radius: 6px;
+        font-family: 'VT323', monospace;
+        font-size: 1.4rem;
+        white-space: nowrap;
+        box-shadow: 3px 3px 0 rgba(0,0,0,0.3);
+        margin-bottom: 4px;
+    }}
+    
+    .arrow-down {{
+        font-size: 2.5rem;
+        color: var(--accent-pink);
+        text-shadow: 2px 2px 0 #000;
+        line-height: 1;
+        animation: bounce-arrow 1.5s ease-in-out infinite;
+    }}
+    
+    @keyframes bounce-arrow {{
+        0%, 100% {{ transform: translateY(0); }}
+        50% {{ transform: translateY(-8px); }}
     }}
 """
 
@@ -271,6 +332,15 @@ def login_page():
                 ui.navigate.to(f'/room/{rid}')
 
             ui.button('LET\'S GO!', on_click=go).classes('funky-btn btn-pink w-full text-xl font-bold')
+        
+        # 使用说明
+        with ui.card().classes('w-80 mt-4 instruction-box'):
+            with ui.column().classes('gap-3'):
+                ui.label('📖 使用说明').classes('text-xl font-bold mb-1').style('font-family: "Press Start 2P", cursive; font-size: 0.9rem; line-height: 1.5;')
+                with ui.column().classes('gap-1.5'):
+                    ui.label('1. 输入您的昵称，输入与朋友相同的房间号并进入').classes('text-base').style('font-family: "VT323", monospace;')
+                    ui.label('2. 添加 3 项你想吃的餐厅').classes('text-base').style('font-family: "VT323", monospace;')
+                    ui.label('3. 开启抽签！或等待房主开始抽签').classes('text-base').style('font-family: "VT323", monospace;')
 
 @ui.page('/room/{room_id}')
 def room_page(room_id: str):
@@ -433,14 +503,19 @@ def room_page(room_id: str):
                     # CSS Wrapper for Layout + Entrance Animation
                     # Only animate on first render to prevent re-animation on refresh
                     animation_class = 'card-entry' if not card.has_animated else 'card-entry-done'
-                    if not card.has_animated:
-                        card.has_animated = True
                     
+                    # Mark as animated after animation starts (use timer to avoid immediate marking)
+                    if not card.has_animated:
+                        def mark_animated_delayed():
+                            card.has_animated = True
+                        # Delay marking to ensure animation has time to start
+                        ui.timer(0.1, mark_animated_delayed, once=True)
+                    
+                    # Wrapper with animation - rotation is handled by CSS animation
                     with ui.element('div').classes(animation_class).style(f'--target-rotation: {card.rotation}deg'):
                         
-                        # The Card Object itself
-                        card_element = ui.element('div').classes('messy-card group') \
-                             .style(f'transform: rotate({card.rotation}deg);') # Apply random rotation
+                        # The Card Object itself - rotation will be applied after animation
+                        card_element = ui.element('div').classes('messy-card group')
                         
                         # Add click handler for flipping other people's cards
                         if not is_mine:
@@ -472,17 +547,24 @@ def room_page(room_id: str):
                                     ui.label(card.back_text).classes('text-sm font-bold opacity-80 rotate-[-10deg]')
 
             # --- FOOTER CONTROLS ---
-            with ui.row().classes('fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-white border-[3px] border-black p-2 rounded-xl shadow-[6px_6px_0_rgba(0,0,0,0.3)] gap-2 z-50 items-center'):
+            with ui.column().classes('fixed bottom-6 left-1/2 transform -translate-x-1/2 items-center gap-2 z-50'):
+                # 箭头提示（始终显示）
                 if not room.winner_card:
-                    ui.input(placeholder='Sushi? Tacos?').bind_value(input_state, 'text').props('input-class="comic-input"').classes('w-48').on('keydown.enter', add_card)
-                    ui.button('ADD', on_click=add_card).classes('funky-btn btn-blue font-bold rounded-lg')
-                    
-                    if user.uid == room.host_id:
-                        ui.element('div').classes('w-[2px] h-8 bg-gray-300 mx-1')
-                        ui.button('SPIN!', on_click=start_lottery).classes('funky-btn btn-pink font-black rounded-lg animate-bounce')
-                else:
-                    if user.uid == room.host_id:
-                        ui.button('RESET TABLE', on_click=reset_game).classes('funky-btn btn-yellow font-bold')
+                    with ui.element('div').classes('arrow-tooltip-container'):
+                        ui.label('在此输入想吃的餐厅').classes('tooltip-text')
+                        ui.label('↓').classes('arrow-down')
+                
+                with ui.row().classes('bg-white border-[3px] border-black p-2 rounded-xl shadow-[6px_6px_0_rgba(0,0,0,0.3)] gap-2 items-center'):
+                    if not room.winner_card:
+                        ui.input(placeholder='Sushi? Tacos?').bind_value(input_state, 'text').props('input-class="comic-input"').classes('w-48').on('keydown.enter', add_card)
+                        ui.button('ADD', on_click=add_card).classes('funky-btn btn-blue font-bold rounded-lg')
+                        
+                        if user.uid == room.host_id:
+                            ui.element('div').classes('w-[2px] h-8 bg-gray-300 mx-1')
+                            ui.button('SPIN!', on_click=start_lottery).classes('funky-btn btn-pink font-black rounded-lg animate-bounce')
+                    else:
+                        if user.uid == room.host_id:
+                            ui.button('RESET TABLE', on_click=reset_game).classes('funky-btn btn-yellow font-bold')
 
         # --- LOTTERY OVERLAY (SLOT MACHINE) ---
         # Only visible when rolling OR when there is a winner (and user hasn't closed it)
